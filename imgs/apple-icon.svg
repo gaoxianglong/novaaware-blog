@@ -1,0 +1,27 @@
+<svg width="180" height="180" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="nova-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06120C"/>
+      <stop offset="100%" stop-color="#0A1F14"/>
+    </linearGradient>
+    <linearGradient id="nova-n" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#B5FFD8"/>
+      <stop offset="45%" stop-color="#22D17A"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="nova-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#nova-bg)"/>
+  <rect width="32" height="14" rx="7" fill="url(#nova-sheen)"/>
+  <path
+    d="M 7 24 L 7 8 L 25 24 L 25 8"
+    stroke="url(#nova-n)"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+</svg>

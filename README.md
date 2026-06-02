@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://novaaware.com">
-    <img src="imgs/image-ENG.png" alt="NovaAware — deep technical writing on models and systems" width="640"/>
+    <img src="imgs/apple-icon.svg" alt="NovaAware" width="48" height="48"/>
   </a>
 </p>
 
