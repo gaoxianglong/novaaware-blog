@@ -23,6 +23,8 @@ Articles in this repository are grouped by **year** and **language**. Choose a l
 | Article | Link |
 |--------|------|
 | Lessons Learned from Integrating DeepSeek V4 into Various Agents | [Read →](2026/en/deepseek-v4-agent-integration-pitfalls.md) |
+| AI-Testing Series (Part 1) — API Test Automation with AI | [Read →](2026/en/ai-testing-api-test-automation-with-ai.md) |
+| AI-Testing Series (Part 2) — UI Automation with AI Agents & Visual Recognition | [Read →](2026/en/ai-testing-ui-automation-with-ai-agent.md) |
 
 ### Persian / Farsi (`ir`)
 
