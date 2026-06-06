@@ -1,12 +1,15 @@
 """Generate data charts for AI-Testing UI automation article."""
+from io import BytesIO
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
+from PIL import Image
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "imgs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+TOP_PADDING_PX = 40
 
 # Palette aligned with existing article figures
 COLORS = {
@@ -39,9 +42,20 @@ plt.rcParams.update({
 
 def save(fig, name: str):
     path = OUT_DIR / name
-    fig.savefig(path, dpi=160, bbox_inches="tight", facecolor="white")
+    try:
+        fig.tight_layout()
+    except Exception:
+        pass
+    buf = BytesIO()
+    fig.savefig(buf, dpi=160, bbox_inches="tight", facecolor="white", pad_inches=0.05)
     plt.close(fig)
-    print(f"Wrote {path}")
+    buf.seek(0)
+    img = Image.open(buf).convert("RGB")
+    w, h = img.size
+    canvas = Image.new("RGB", (w, h + TOP_PADDING_PX), (255, 255, 255))
+    canvas.paste(img, (0, TOP_PADDING_PX))
+    canvas.save(path)
+    print(f"Wrote {path} ({canvas.size[0]}x{canvas.size[1]}, +{TOP_PADDING_PX}px top)")
 
 
 def chart_failure_root_causes():
@@ -67,7 +81,6 @@ def chart_failure_root_causes():
     ax.set_yticklabels(labels)
     ax.invert_yaxis()
     ax.set_xlabel("Share of broken XPath locators (%)")
-    ax.set_title("Figure 2 — XPath Locator Failure Root-Cause Taxonomy\nPortal regression audit, n=287 broken locators, 6 post-refactor releases")
     ax.set_xlim(0, 45)
     for bar, val in zip(bars, values):
         ax.text(bar.get_width() + 0.6, bar.get_y() + bar.get_height() / 2,
@@ -94,7 +107,6 @@ def chart_triage_time():
     b1 = ax.bar(x - w / 2, median_min, w, label="Median (P50)", color=COLORS["blue"])
     b2 = ax.bar(x + w / 2, p90_min, w, label="P90", color=COLORS["teal"])
     ax.set_ylabel("Minutes to root-cause classification")
-    ax.set_title("Figure 4 — Failure Triage Time: DOM vs Visual Evidence\nPortal regression, n=84 incidents over 12 weeks")
     ax.set_xticks(x)
     ax.set_xticklabels(methods)
     ax.set_ylim(0, 115)
@@ -135,7 +147,6 @@ def chart_effort_distribution():
     ax.bar(x, internal_before, w, label="Our team — legacy XPath suite", color=COLORS["red"], alpha=0.85)
     ax.bar(x + w, internal_after, w, label="Our team — visual + NL (pilot wk 12)", color=COLORS["green"], alpha=0.9)
     ax.set_ylabel("Share of automation engineer-hours (%)")
-    ax.set_title("Figure 3 — UI Automation Effort Distribution\nIndustry benchmark vs. internal telemetry (12-week pilot)")
     ax.set_xticks(x)
     ax.set_xticklabels(categories)
     ax.set_ylim(0, 58)
@@ -166,7 +177,6 @@ def chart_pilot_outcomes():
     fig, ax = plt.subplots(figsize=(10, 5.5))
     b1 = ax.bar(x - w / 2, legacy, w, label="Legacy XPath suite", color=COLORS["red"], alpha=0.85)
     b2 = ax.bar(x + w / 2, visual, w, label="Visual + NL Agent suite", color=COLORS["green"], alpha=0.9)
-    ax.set_title("Figure 11 — 12-Week Pilot: Legacy vs. Visual + NL Agent Suite")
     ax.set_ylabel("Value (hours or % — see axis labels per metric)")
     ax.set_xticks(x)
     ax.set_xticklabels(metrics)
@@ -207,7 +217,6 @@ def chart_post_refactor_failures():
     for t in autotexts:
         t.set_fontweight("bold")
         t.set_fontsize(11)
-    ax.set_title("Figure 1 — Post-Refactor Regression Failure Breakdown\nFirst sprint after React/CSS/navigation redesign, n=180 cases × 3 browsers")
     centre = plt.Circle((0, 0), 0.55, fc="white")
     ax.add_artist(centre)
     ax.text(0, 0.06, "540\nruns", ha="center", va="center", fontsize=14, fontweight="bold")
@@ -234,8 +243,6 @@ def chart_recognition_performance():
     ax1.set_ylim(75, 100)
     ax1.set_xticks(x)
     ax1.set_xticklabels(modes)
-    ax1.set_title("Figure 10 — Segmentation Mode: Accuracy vs. Latency Trade-off\nCheckout + account settings routes, n=1,240 actions logged")
-
     ax2 = ax1.twinx()
     ax2.plot(x, latency, color=COLORS["orange"], marker="o", linewidth=2.5, markersize=8, label="P50 latency (ms)")
     ax2.set_ylabel("P50 latency (ms)", color=COLORS["orange"])

@@ -48,17 +48,26 @@ def renumber_files():
         print(f"Renamed -> {dest.name}")
 
 
-def patch_diagram_title(img_path: Path, new_title: str):
+def patch_diagram_title(img_path: Path, new_title: str, banner_h: int = 98):
+    """Replace baked-in diagram title with a single matplotlib-style heading."""
     img = Image.open(img_path).convert("RGB")
     draw = ImageDraw.Draw(img)
-    w, h = img.size
-    banner_h = max(42, int(h * 0.055))
+    w, _ = img.size
     draw.rectangle([(0, 0), (w, banner_h)], fill=(255, 255, 255))
-    try:
-        font = ImageFont.truetype("arial.ttf", 18)
-    except OSError:
-        font = ImageFont.load_default()
-    draw.text((w // 2, banner_h // 2), new_title, fill=(30, 41, 59), font=font, anchor="mm")
+    for size in range(24, 14, -1):
+        try:
+            font = ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", size)
+        except OSError:
+            font = ImageFont.load_default()
+            break
+        bbox = font.getbbox(new_title)
+        if bbox[2] - bbox[0] <= int(w * 0.92):
+            break
+    bbox = font.getbbox(new_title)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    x = (w - text_w) // 2 - bbox[0]
+    y = (banner_h - text_h) // 2 - bbox[1]
+    draw.text((x, y), new_title, fill=(30, 41, 59), font=font)
     img.save(img_path)
     print(f"Patched title on {img_path.name}")
 

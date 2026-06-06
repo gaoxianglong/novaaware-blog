@@ -4,7 +4,7 @@
 
 ## I. Background
 
-Recently, our product managers began prioritizing user experience far more aggressively — driving major changes to page layouts, UI styling, and interaction patterns. For our UI automation suite, built over three years on Selenium and XPath-heavy locators, it was practically a disaster. Within the first sprint after those changes landed — a React component library upgrade, CSS module migration, and navigation redesign — **47% of cases failed on locator resolution alone**, before any functional defect was found. Repairing those locators consumed six engineer-days and still left flaky failures in checkout and account settings.
+Recently, our product managers pushed through a heavier round of UX changes: page layouts moved, styling changed, and a few interaction patterns were redesigned. Our UI automation suite had grown for three years around Selenium and XPath-heavy locators, so the impact was immediate. In the first sprint after the React component library upgrade, CSS module migration, and navigation redesign, **47% of cases failed on locator resolution alone**, before any functional defect was found. Repairing those locators consumed six engineer-days and still left flaky failures in checkout and account settings.
 
 ![Figure 1: Post-refactor regression failure breakdown](../imgs/uitest-figure1.png)
 
@@ -12,13 +12,13 @@ Recently, our product managers began prioritizing user experience far more aggre
 
 Across those 254 failures, locator-resolution errors outnumbered functional regressions by nearly two to one. Environment and data issues accounted for 15%, and timing flakes another 10% — yet sign-off was blocked primarily by selectors that no longer matched a UI that still looked correct to human reviewers.
 
-That incident forced a rethink. We did not need another Page Object Model tutorial; we needed a **locator strategy that survives DOM churn** and an **authoring model that does not require every tester to be a CSS selector expert**. We chose to rebuild the framework end-to-end with an AI Agent as the implementation partner: the Agent scaffolds the repo, implements the visual recognition layer, compiles natural-language specs into executable scripts, and runs the debug loop until the first smoke path is green. From blank repository to first passing visual-based checkout test took roughly five to six focused hours — compared with an estimated two to three days of manual framework bootstrapping on our previous attempts.
+That sprint changed the discussion. Another Page Object Model cleanup was not enough; we needed locators that could survive DOM churn and a test authoring style that did not assume every tester was comfortable writing selectors. We rebuilt the framework with an AI Agent handling the repetitive implementation work: scaffolding the repo, wiring the visual recognition layer, compiling natural-language specs into pytest, and iterating until the first smoke path passed. From a blank repository to the first passing visual-based checkout test took roughly five to six focused hours. Previous manual bootstraps for the same kind of framework had taken two to three days.
 
-This article documents that approach as a reusable playbook for UI test engineers and automation leads who want to move beyond brittle XPath chains without abandoning the rigor of pytest, CI gates, and evidence-based reporting.
+The rest of this article is the build notes: what we prepared, what the Agent implemented, where human review mattered, and which trade-offs showed up once the framework was running in CI.
 
 ### Why traditional XPath and CSS selector strategies fall short
 
-For more than a decade, DOM-centric locators have been the default in UI automation. XPath in particular was attractive because it can reach deeply nested elements, traverse text nodes, and express positional logic (`//div[3]/button[2]`). In practice, however, the very flexibility that made XPath popular becomes a liability in modern single-page applications.
+For more than a decade, DOM-centric locators have been the default in UI automation. XPath in particular was attractive because it can reach deeply nested elements, traverse text nodes, and express positional logic (`//div[3]/button[2]`). That flexibility is also where the trouble starts in modern single-page applications.
 
 **Structural fragility.** SPAs re-render subtrees on every state change. A locator tied to sibling index or ancestor depth breaks when marketing inserts a banner, when a skeleton loader appears, or when an A/B test reorders modules. Our internal audit found that **38% of broken XPath locators** failed because an intermediate wrapper `<div>` was added or removed — the target element was still visible to the user, but the path no longer existed in the DOM.
 
@@ -34,7 +34,7 @@ The remaining top drivers were dynamic class names (22%), i18n copy changes (14%
 
 **False confidence from "green locally."** XPath locators frequently pass in a developer's viewport size and locale, then fail in CI headless mode at 1280×720 with a different default language. The failure mode is `NoSuchElementException`, which tells you nothing about *what the user actually saw* on screen.
 
-**Maintenance economics.** Industry surveys and our own telemetry align: teams spend **40–60% of UI automation effort** on locator repair after UI releases, not on designing new coverage. The World Quality Report 2024–25 (Capgemini, Sogeti, Cognizant) places test design and maintenance at roughly half of total QA effort for mature agile teams; locator churn is the largest single slice within that bucket for web UI suites. Our legacy XPath suite tracked at **48%** of engineer-hours on locator repair across six releases — squarely inside the industry band.
+**Maintenance economics.** The numbers were not unusual. Industry surveys and our own telemetry both put **40–60% of UI automation effort** into maintenance after UI releases, much of it locator repair rather than new coverage. The World Quality Report 2024–25 (Capgemini, Sogeti, Cognizant) places test design and maintenance at roughly half of total QA effort for mature agile teams. Our legacy XPath suite tracked at **48%** of engineer-hours on locator repair across six releases.
 
 ![Figure 3: UI automation effort distribution](../imgs/uitest-figure3.png)
 
@@ -42,13 +42,13 @@ The remaining top drivers were dynamic class names (22%), i18n copy changes (14%
 
 After the visual + NL pilot, locator repair dropped to **18%** of effort; new test design rose from 24% to 38%, and evidence packaging grew from 5% to 25% as screenshot-first reporting became default. XPath is not wrong for every scenario — stable `data-testid` contracts, agreed with development, remain the gold standard when available. But where those contracts do not exist or are inconsistently applied, DOM-only strategies become a tax on every release.
 
-**Diagnostic blindness.** When an XPath-based step fails, the error message typically reports a selector string and a timeout — not the perceptual state of the page. Testers must manually reproduce, screenshot, and compare against the last known good run. In our portal regression, the median time from `NoSuchElementException` to root-cause classification was **52 minutes** per incident (P90: 98 minutes), because half of those failures were "element moved but still visible" scenarios that XPath cannot express. Visual-first failure bundles cut that median to **14 minutes** (P90: 31 minutes) — a **73% reduction** — because the artifact is the same image the automation engine consumed.
+**Diagnostic blindness.** When an XPath-based step fails, the error message usually gives you a selector string and a timeout, not what the page looked like. Testers reproduce the case, take screenshots, and compare against the last known good run. In our portal regression, the median time from `NoSuchElementException` to root-cause classification was **52 minutes** per incident (P90: 98 minutes), because half of those failures were "element moved but still visible" scenarios that XPath cannot express. Visual-first failure bundles cut that median to **14 minutes** (P90: 31 minutes) — a **73% reduction** — because the screenshot used by the locator was already attached to the failure.
 
 ![Figure 4: Failure triage time comparison](../imgs/uitest-figure4.png)
 
 *Figure 4: Median and P90 triage time per failure incident (n=84 incidents, 12-week observation window)*
 
-**Version skew across layers.** Modern UIs stack frameworks: a React shell, a Vue micro-frontend island, a Web Components design system, and third-party iframes for payments. XPath written against the outer DOM tree does not survive when the inner island re-mounts with a different virtual DOM ordering. Teams often maintain parallel locator files per browser because CSS pseudo-class support and shadow piercing differ. The result is a **locator inventory** that grows faster than test coverage — a smell that the automation strategy is fighting the architecture instead of aligning with what end users see.
+**Version skew across layers.** Modern UIs stack frameworks: a React shell, a Vue micro-frontend island, a Web Components design system, and third-party iframes for payments. XPath written against the outer DOM tree does not survive when the inner island re-mounts with a different virtual DOM ordering. Teams often maintain parallel locator files per browser because CSS pseudo-class support and shadow piercing differ. The locator inventory starts growing faster than the test coverage.
 
 ![Figure 5: Traditional XPath vs. visual segmentation locators](../imgs/uitest-figure5.png)
 
@@ -63,13 +63,13 @@ After the visual + NL pilot, locator repair dropped to **18%** of effort; new te
 | Shadow DOM | XPath returns empty node set | Payment and widget flows untestable |
 | Locator debt | Long, commented XPath "works until it doesn't" | Onboarding friction, review fatigue |
 
-The alternative we adopted treats the **rendered page as the source of truth**: capture a screenshot, segment it into semantically meaningful regions, and locate elements by visual appearance and human-readable descriptors — then let an AI Agent wire the plumbing and translate natural-language test steps into code.
+The alternative we adopted starts from the rendered page: capture a screenshot, segment it into meaningful regions, and locate elements by visual appearance plus human-readable descriptors. The Agent then handles the plumbing and translates natural-language test steps into code.
 
 ---
 
 ## II. Architecture overview — visual segmentation plus NL-driven script generation
 
-The framework rests on two coupled ideas:
+The design has two moving parts:
 
 1. **Visual element location** — Instead of querying the DOM for `//button[@type='submit']`, the runner captures the viewport, splits the image into tiles (fixed grid, layout-aware segmentation, or a hybrid), and resolves targets inside the relevant tile using OCR, icon embedding, and bounding-box matching.
 
@@ -92,7 +92,7 @@ The framework rests on two coupled ideas:
 | Recognition | OCR, embedding match, confidence | `uiauto/recognize/` |
 | Driver runtime | Browser control, screenshots, video | Playwright, `conftest.py` |
 
-The Agent's job is not to "invent tests" in isolation — it implements this architecture under human-written constraints, then iterates until `pytest -m smoke` passes on a clean QA environment.
+In this setup, the Agent is not asked to invent coverage. It implements the architecture under human-written constraints, then iterates until `pytest -m smoke` passes on a clean QA environment.
 
 ### How visual tile location works in practice
 
@@ -105,7 +105,7 @@ At runtime, the `VisualDriver` executes a repeatable pipeline for every action:
 5. **Act** — Playwright moves the pointer to the bbox center (with optional offset for rounded corners) and performs click, fill, or hover. Bboxes detected in screenshot pixels are normalized back to CSS viewport coordinates before mouse actions, especially when local Retina debugging uses device scale factor 2.0. No DOM query is required.
 6. **Verify** — Assertions re-capture (or reuse, if the page is static) and run the same detect pipeline on the assertion target — comparing OCR text, visibility, or pixel diff against a golden crop.
 
-This loop is **deterministic given the same screenshot**, which makes failures reproducible and debuggable — a property XPath-heavy suites often lose when timing-dependent DOM queries return different node sets on retry.
+Given the same screenshot, this loop is deterministic. That makes failures easier to reproduce and debug, which is where XPath-heavy suites often struggle when timing-dependent DOM queries return different node sets on retry.
 
 | Traditional XPath step | Visual tile step |
 | --- | --- |
@@ -119,7 +119,7 @@ This loop is **deterministic given the same screenshot**, which makes failures r
 
 ## III. Building the framework entirely with an AI Agent
 
-An Agent is not a substitute for test strategy. Without explicit inputs it will hallucinate base URLs, invent `data-testid` attributes that do not exist, or weaken assertions to achieve green runs. Before the first prompt, prepare three hard inputs in a `FRAMEWORK_SPEC.md` at repository root.
+An Agent is not a substitute for test strategy. Without explicit inputs it will fill in base URLs, assume `data-testid` attributes that do not exist, or weaken assertions to make a run pass. Before the first prompt, prepare three hard inputs in a `FRAMEWORK_SPEC.md` at repository root.
 
 ### 1. Three hard inputs before the Agent starts
 
@@ -152,7 +152,7 @@ With these inputs, the opening Agent prompt can be concrete rather than "build m
 
 ![Figure 8: AI-Agent closed-loop framework build workflow](../imgs/uitest-figure8.png)
 
-*Figure 8: Eight-step Agent closed-loop as a ring chart; each arc is one build phase, with Human Review at the center*
+*Figure 8: Eight-step Agent closed-loop build workflow; each arc is one Agent phase, with Human checkpoints marked by a red star*
 
 The steps below are **Agent tasks** you orchestrate; your role is specification, diff review, and environment access.
 
@@ -359,7 +359,7 @@ Not every page needs a Segment Anything Model (SAM). Our framework supports thre
 | Layout heuristics | Forms, wizards, modal-heavy flows | Good region boundaries without GPU | Needs tuning per design system |
 | SAM / CV hybrid | Marketing pages, dense SPAs | Highest region accuracy | GPU optional; 400–800 ms |
 
-**Practical rule:** start with **hybrid grid + layout refine** on checkout and account settings; use **fixed grid** on internal ops consoles. The Agent can encode this table into `visual.routes.yaml` after you label three representative pages.
+**Practical rule:** start with **hybrid grid + layout refine** on checkout and account settings; use **fixed grid** on internal ops consoles. After you label three representative pages, the Agent can turn the table into `visual.routes.yaml`.
 
 We logged **1,240 visual actions** across checkout and account-settings routes during the pilot. Mode selection materially affected both accuracy and latency:
 
@@ -378,7 +378,7 @@ Hybrid mode delivered the highest accuracy on commerce flows while staying under
 
 ### Recognition confidence and self-healing
 
-Visual location is probabilistic. Treat confidence as a first-class metric:
+Visual location is probabilistic, so confidence needs an explicit policy:
 
 | Confidence band | Framework behavior |
 | --- | --- |
@@ -387,14 +387,14 @@ Visual location is probabilistic. Treat confidence as a first-class metric:
 | 0.75 – 0.84 | Single re-capture retry; refresh tile map |
 | &lt; 0.75 | Fail test with `VisualLocatorError`; Agent may propose new golden on human approval |
 
-**Self-healing** does not mean silent auto-patch in CI. The Agent workflow we use:
+**Self-healing** does not mean silent auto-patch in CI. Our workflow is deliberately boring:
 
 1. Failure bundle includes annotated screenshot, tile map, and NL line number.
 2. Human confirms UI change is intentional.
 3. Agent re-embeds golden icon or updates OCR synonym map.
 4. Re-run single test; PR touches only `golden/` or `recognize/synonyms.yaml`.
 
-This keeps healing **auditable** — critical for regulated domains (finance, healthcare) where unexplained locator changes are compliance risks.
+That keeps healing auditable, which matters in finance, healthcare, and any team where unexplained locator changes are hard to defend in review.
 
 ### Combining visual location with accessibility hooks
 
@@ -410,7 +410,7 @@ You retain DOM speed where developers cooperate, and visual resilience everywher
 
 ### Technology stack selection (Agent-guided)
 
-When the Agent scaffolds dependencies, constrain choices up front to avoid experimental packages that lack CI support:
+When the Agent scaffolds dependencies, constrain choices up front so it does not pull in experimental packages that later fail in CI:
 
 | Component | Recommended choice | Rationale |
 | --- | --- | --- |
@@ -423,11 +423,11 @@ When the Agent scaffolds dependencies, constrain choices up front to avoid exper
 | Reporting | allure-pytest | Business-readable steps with attachments |
 | Parallelism | pytest-xdist (capped) | Sharded smoke; watch QA env rate limits |
 
-Prompt the Agent to **pin versions** in `requirements.txt` and document GPU-optional paths in `FRAMEWORK_SPEC.md` so operators without CUDA can still run smoke on CPU.
+Ask the Agent to pin versions in `requirements.txt` and document GPU-optional paths in `FRAMEWORK_SPEC.md` so operators without CUDA can still run smoke on CPU.
 
 ### Evidence store and audit trail
 
-Regulated teams often ask: "How do we prove what the test saw at assertion time?" The framework should persist:
+Regulated teams usually ask a simple question: "How do we prove what the test saw at assertion time?" Persist these artifacts:
 
 | Artifact | Path | Retention |
 | --- | --- | --- |
@@ -437,7 +437,7 @@ Regulated teams often ask: "How do we prove what the test saw at assertion time?
 | Playwright trace | `traces/{test_name}.zip` | On failure only |
 | NL source hash | embedded in Allure | Permanent in report |
 
-Have the Agent implement `uiauto/common/evidence.py` early — retrofitting evidence capture after cases exist is painful and reviewers will not trust historical results.
+Implement `uiauto/common/evidence.py` early. Retrofitting evidence capture after cases exist is painful, and reviewers will not trust historical results that lack screenshots.
 
 ---
 
@@ -466,7 +466,7 @@ Do not ask for "scaffold + segmentation + SAM + twenty NL cases + Jenkins" in on
 
 ### The repository is the source of truth
 
-Always include: **Read neighboring files and match conventions.** The Agent's guess on `Promo code field` vs. `Coupon input` must come from your `golden/` captions and existing NL specs — not from generic Copilot tropes.
+Always include: **Read neighboring files and match conventions.** The choice between `Promo code field` and `Coupon input` should come from your `golden/` captions and existing NL specs, not from generic code-completion habits.
 
 ### NL style guide for testers
 
@@ -481,7 +481,7 @@ Always include: **Read neighboring files and match conventions.** The Agent's gu
 
 ### End-to-end NL conversion example (Agent session transcript pattern)
 
-A productive Agent session for script generation typically follows this message sequence — copy/adapt as your team SOP:
+A script-generation session usually works better when it is split into small messages. This is the pattern we used:
 
 **Message 1 — Context load**
 
@@ -511,7 +511,7 @@ On VisualLocatorError: annotate which tile and label failed; adjust synonyms or 
 Summarize: pass/fail, confidence scores per step, files changed, and whether golden/ needs human review.
 ```
 
-This pattern keeps the Agent inside a **compiler-and-runner role** rather than drifting into rewriting business expectations. The NL file remains the authoritative spec; generated Python is treated as a build artifact — similar to how API test series treats Agent-generated `testdata/` as reviewable but disposable scaffolding.
+This keeps the Agent in a compiler-and-runner role instead of letting it rewrite business expectations. The NL file remains the spec; generated Python is a build artifact, similar to how the API test series treats Agent-generated `testdata/` as reviewable but disposable scaffolding.
 
 ### Structuring `nl_specs/` for scale
 
@@ -535,7 +535,7 @@ On the checkout page, enter promo code {promo_code} in the promo code field.
 | `PRECONDITIONS` | Agent emits fixture calls or setup steps |
 | `DATA` | Parametrize without embedding values in prose |
 
-The Agent can extend the compiler to support **parametrized NL** — one spec file generating three pytest invocations from a data table — which is how we later scaled promo, shipping, and tax scenarios without tripling prose volume.
+The compiler can later support **parametrized NL**: one spec file generating three pytest invocations from a data table. We used that for promo, shipping, and tax scenarios without tripling the prose.
 
 ---
 
@@ -560,9 +560,9 @@ The pilot ran from week 1 through week 12 of the visual + NL migration: all 180+
 
 *Figure 11: Headline pilot metrics — legacy XPath suite vs. visual + NL Agent suite*
 
-**How to read the flake-rate delta.** We define a smoke flake as a job that fails on first run but passes on immediate retry without code or env change. The legacy 14% rate translated to roughly **one in seven PRs** needing a manual re-run before merge; at 5%, re-runs became exceptional rather than routine. Locator repair hours fell from roughly **six engineer-days per release** to under **1.5 days** — freeing capacity for checkout edge cases and accessibility coverage that had been deprioritized for three quarters.
+**How to read the flake-rate delta.** We define a smoke flake as a job that fails on first run but passes on immediate retry without code or env change. The legacy 14% rate meant roughly **one in seven PRs** needed a manual re-run before merge. At 5%, re-runs became occasional instead of routine. Locator repair hours fell from roughly **six engineer-days per release** to under **1.5 days**, which gave us room to add checkout edge cases and accessibility coverage that had been parked for three quarters.
 
-**Recognition quality.** Across 1,240 logged visual actions, **94.2%** matched on the first attempt above the 0.85 confidence threshold. The remaining 5.8% triggered a single re-capture retry; only **1.1%** ended in `VisualLocatorError` requiring golden or synonym updates. No silent threshold lowering occurred during the pilot.
+**Recognition quality.** Across 1,240 logged visual actions, **94.2%** matched on the first attempt above the 0.85 confidence threshold. The remaining 5.8% triggered a single re-capture retry; only **1.1%** ended in `VisualLocatorError` requiring golden or synonym updates. We did not lower thresholds silently during the pilot.
 
 ### Common failures and fixes
 
@@ -594,15 +594,15 @@ The pilot ran from week 1 through week 12 of the visual + NL migration: all 180+
 
 Three field lessons from our pilot:
 
-**Treat visual evidence as the assertion artifact.** In XPath failures, logs show selector strings; in visual failures, logs show *what the user saw*. Train reviewers to read Allure image attachments first — it collapses triage time.
+**Treat visual evidence as the assertion artifact.** XPath failures show selector strings; visual failures show *what the user saw*. In review, start with the Allure image attachment before reading logs.
 
-**Invest in golden hygiene early.** One hour curating `golden/` per major page saves multiple hours of OCR tuning later. The Agent can bulk-crop regions from full-page screenshots if you provide page-level PNGs.
+**Invest in golden hygiene early.** One hour curating `golden/` per major page saves multiple hours of OCR tuning later. If you provide page-level PNGs, the Agent can bulk-crop the first set of regions.
 
-**Keep NL specs as the contract.** Generated Python is disposable; `nl_specs/` is what product and QA can read. When developers dispute a failure, the NL line is the shared language — not an XPath string nobody outside automation understands.
+**Keep NL specs as the contract.** Generated Python is disposable; `nl_specs/` is what product and QA can read. When developers dispute a failure, the NL line is the shared language, not an XPath string only automation engineers understand.
 
 ### Positioning against commercial "no-code" and record-and-playback tools
 
-Record-and-playback and cloud no-code platforms also reduce XPath exposure, but they introduce different trade-offs. The Agent-built approach in this article targets teams that need **version-controlled, code-reviewed automation** inside the same monorepo as application code:
+Record-and-playback and cloud no-code platforms also reduce XPath exposure, but they come with different trade-offs. The approach here fits teams that want version-controlled, code-reviewed automation inside the same monorepo as application code:
 
 | Dimension | Record-and-playback SaaS | Agent-built visual + NL framework |
 | --- | --- | --- |
@@ -613,7 +613,7 @@ Record-and-playback and cloud no-code platforms also reduce XPath exposure, but 
 | Vendor lock-in | High | Low — Playwright + open CV stack |
 | Setup time | Minutes for first recording | Hours for framework; faster case ramp after |
 
-We are not arguing against SaaS tools for exploratory coverage or business-user acceptance checks. The sweet spot for this architecture is **regression suites owned by automation engineers** who already live in pytest and need maintainability across quarterly UI refactors.
+SaaS tools can still be a good fit for exploratory coverage or business-user acceptance checks. This architecture is aimed at regression suites owned by automation engineers who already work in pytest and need maintainability across quarterly UI refactors.
 
 ### When not to use visual-only location
 
@@ -630,9 +630,9 @@ Encode these exceptions in `./rules` so the Agent does not blindly visual-click 
 
 ## VII. Closing
 
-Building UI automation with an AI Agent shifts the engineer's role from **writing every locator and wrapper** to **owning the spec, visual evidence policy, and acceptance gates**. The technical pillars remain familiar — layered architecture, pytest markers, CI smoke gates, Allure reporting — but element location moves from brittle DOM paths to **segmented screenshot recognition**, and authoring moves from hand-coded Page Objects to **natural-language specs compiled into scripts**.
+Building UI automation with an AI Agent changes where the engineer spends time. Less of it goes into writing every locator and wrapper; more of it goes into the spec, visual evidence policy, and acceptance gates. The familiar pieces remain — layered architecture, pytest markers, CI smoke gates, Allure reporting — but element location moves from brittle DOM paths to segmented screenshot recognition, and authoring moves from hand-coded Page Objects to natural-language specs compiled into scripts.
 
-Remember the eight-step loop: **Rules → scaffold → segment → recognize → VisualDriver → NL compiler → green test → CI/Skill**. XPath and CSS selectors are not obsolete when stable test hooks exist; the framework we describe uses them as a fast path while visual recognition carries everything else. The Agent accelerates implementation; it does not remove the need for human judgment on thresholds, golden assets, and assertion meaning.
+The eight-step loop is simple: **Rules → scaffold → segment → recognize → VisualDriver → NL compiler → green test → CI/Skill**. XPath and CSS selectors are still useful when stable test hooks exist; use them as a fast path and let visual recognition cover the gaps. The Agent speeds up implementation, but humans still own thresholds, golden assets, and assertion meaning.
 
 **Working alongside traditional roles**
 
@@ -643,9 +643,9 @@ Remember the eight-step loop: **Rules → scaffold → segment → recognize →
 | Human (tester) | NL authoring, exploratory scenarios, defect filing |
 | Human + Agent | Complex flows (multi-page, file upload, 3-D secure) — Agent drafts; human adds state and teardown |
 
-A maintainable visual framework means switchable environments, auditable self-healing, evidence on every failure, and NL specs that stakeholders can actually read. An Agent can draft that stack in hours; your team spends the saved time on coverage depth and edge cases — with far higher ROI than repairing another hundred-line XPath.
+A maintainable visual framework needs switchable environments, auditable self-healing, evidence on every failure, and NL specs that stakeholders can actually read. An Agent can draft much of that stack in hours. The useful part is getting time back for coverage depth and edge cases instead of repairing another hundred-line XPath.
 
-If this article helps your team, feel free to share it with your automation guild. Questions and war stories are welcome in the comments.
+If your team has tried a similar migration, I would be interested in the failure modes you hit — especially around golden management, CI latency, and review policy.
 
 *Attribution: NovaAware Team — original work; all rights reserved.*
 
@@ -657,6 +657,6 @@ If this article helps your team, feel free to share it with your automation guil
   </a>
 </p>
 
-<p align="center"><sub><i>Tired of pulling out nails one by one? <a href="https://novaaware.com"><b>NovaAware</b></a> handles the model-and-agent plumbing for you — so you can stop fighting proxies and get back to your own business.</i></sub></p>
+<p align="center"><sub><i><a href="https://novaaware.com"><b>NovaAware</b></a> helps teams wire model-and-agent workflows into practical engineering systems.</i></sub></p>
 
 ---
